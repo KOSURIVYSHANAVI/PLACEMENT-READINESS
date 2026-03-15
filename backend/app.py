@@ -241,21 +241,89 @@ def login_admin():
         return jsonify({'message': 'Login successful', 'admin_id': 'admin_001', 'name': 'Admin'}), 200
     return jsonify({'error': 'Invalid credentials'}), 401
 
-@app.route('/api/admin/students', methods=['GET'])
-def get_all_students():
-    pipeline = [
-        {'$lookup': {'from': 'test_results', 'localField': '_id', 'foreignField': 'student_id',
-                     'as': 'results', 'pipeline': [{'$project': {'percentage': 1}}]}},
-        {'$project': {'name': 1, 'email': 1, 'created_at': 1,
-                      'tests_taken': {'$size': '$results'}, 'average_score': {'$avg': '$results.percentage'}}}
-    ]
-    students = list(students_col.aggregate(pipeline))
-    return jsonify({'students': [{'id': str(s['_id']), 'name': s['name'], 'email': s['email'],
-                                   'tests_taken': s.get('tests_taken', 0),
-                                   'average_score': round(s.get('average_score') or 0, 2),
-                                   'readiness_status': 'Ready' if (s.get('average_score') or 0) >= 70 else 'Needs Improvement',
-                                   'registered_at': s['created_at'].strftime('%Y-%m-%d')} for s in students],
-                    'total': len(students)})
+@app.route('/api/admin/analytics', methods=['GET'])
+def get_system_analytics():
+    total_students = students_col.count_documents({})
+    total_tests = test_results_col.count_documents({})
+    total_questions = questions_col.count_documents({})
+    total_roadmaps = roadmaps_col.count_documents({})
+    result = list(test_results_col.aggregate([{'$group': {'_id': None, 'avg': {'$avg': '$percentage'}}}]))
+    avg_performance = round(result[0]['avg'], 2) if result else 0
+    category_stats = list(test_results_col.aggregate([
+        {'$group': {'_id': '$category', 'avg_score': {'$avg': '$percentage'}, 'count': {'$sum': 1}}}
+    ]))
+    return jsonify({
+        'total_students': total_students,
+        'total_tests': total_tests,
+        'total_questions': total_questions,
+        'total_roadmaps': total_roadmaps,
+        'avg_performance': avg_performance,
+        'category_stats': [{'category': s['_id'], 'avg_score': round(s['avg_score'], 2), 'attempts': s['count']} for s in category_stats]
+    })
+
+@app.route('/api/admin/questions', methods=['POST'])
+def add_question():
+    data = request.json
+    questions_col.insert_one({**data, 'created_at': datetime.now(timezone.utc)})
+    return jsonify({'message': 'Question added successfully'}), 201
+
+@app.route('/api/admin/questions', methods=['GET'])
+def get_all_questions():
+    questions = list(questions_col.find())
+    return jsonify([{'id': str(q['_id']), 'category': q['category'],
+                     'question_text': q['question_text'], 'correct_answer': q['correct_answer']} for q in questions])
+
+@app.route('/api/admin/questions/count', methods=['GET'])
+def get_question_counts():
+    counts = list(questions_col.aggregate([{'$group': {'_id': '$category', 'count': {'$sum': 1}}}]))
+    return jsonify([{'category': c['_id'], 'count': c['count']} for c in counts])
+
+@app.route('/api/admin/roadmaps', methods=['POST'])
+def add_roadmap():
+    data = request.json
+    roadmaps_col.insert_one({**data, 'created_at': datetime.now(timezone.utc)})
+    return jsonify({'message': 'Roadmap added successfully'}), 201
+
+@app.route('/api/admin/roadmaps', methods=['GET'])
+def get_all_roadmaps():
+    roadmaps = list(roadmaps_col.find())
+    return jsonify([{'id': str(r['_id']), 'category': r['category'], 'title': r['title'],
+                     'description': r['description'], 'resources': r['resources'], 'duration': r['duration']} for r in roadmaps])
+
+@app.route('/api/admin/companies', methods=['POST'])
+def add_company():
+    data = request.json
+    company_col.insert_one({**data, 'created_at': datetime.now(timezone.utc)})
+    return jsonify({'message': 'Company added successfully'}), 201
+
+@app.route('/api/admin/subjects', methods=['POST'])
+def add_subject():
+    data = request.json
+    subjects_col.insert_one({**data, 'created_at': datetime.now(timezone.utc)})
+    return jsonify({'message': 'Subject added successfully'}), 201
+
+@app.route('/api/admin/subjects', methods=['GET'])
+def get_all_subjects():
+    subjects = list(subjects_col.find())
+    return jsonify([{'id': str(s['_id']), 'key': s['key'], 'name': s['name'], 'icon': s.get('icon', '📚')} for s in subjects])
+
+
+    students = list(students_col.find())
+    result = []
+    for s in students:
+        student_id = str(s['_id'])
+        results = list(test_results_col.find({'student_id': student_id}))
+        avg = round(sum(r['percentage'] for r in results) / len(results), 2) if results else 0
+        result.append({
+            'id': student_id,
+            'name': s['name'],
+            'email': s['email'],
+            'tests_taken': len(results),
+            'average_score': avg,
+            'readiness_status': 'Ready' if avg >= 70 else 'Needs Improvement',
+            'registered_at': s['created_at'].strftime('%Y-%m-%d')
+        })
+    return jsonify({'students': result, 'total': len(result)})
 
 # -------------------------------
 # Run Server
