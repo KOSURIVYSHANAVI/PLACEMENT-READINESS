@@ -9,7 +9,11 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
-client = MongoClient('mongodb://localhost:27017/', maxPoolSize=50, minPoolSize=10)
+#client = MongoClient('mongodb://localhost:27017/', maxPoolSize=50, minPoolSize=10)
+import os
+from pymongo import MongoClient
+
+client = MongoClient(os.environ.get("MONGO_URI"))
 
 # Databases
 db1 = client['placement_readiness_module1']
