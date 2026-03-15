@@ -577,6 +577,9 @@ questions_collection.insert_many(cn_questions)
 questions_collection.insert_many(os_questions)
 questions_collection.insert_many(coding_questions)
 questions_collection.insert_many(dsa_questions)
+questions_collection.insert_many(python_questions)
+
+
 
 # Sample Roadmaps
 roadmaps = [

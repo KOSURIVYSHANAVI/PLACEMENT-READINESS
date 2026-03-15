@@ -26,7 +26,10 @@ CORS(app)
 import os
 from pymongo import MongoClient
 
-client = MongoClient(os.environ.get("MONGO_URI"))
+#client = MongoClient(os.environ.get("MONGO_URI"))
+client = MongoClient(
+    os.environ.get("MONGO_URI", "mongodb://localhost:27017/")
+)
 
 
 # Databases
