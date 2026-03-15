@@ -1,7 +1,9 @@
 from pymongo import MongoClient
 
 # Connect to MongoDB
-client = MongoClient('mongodb://localhost:27017/')
+import os
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/")
+client = MongoClient(MONGO_URI)
 
 # Module 1 Database - Questions
 module1_db = client['placement_readiness_module1']
