@@ -178,6 +178,60 @@ def check_company_eligibility(student_id):
     })
 
 # -------------------------------
+# MODULE 3 - ANALYTICS
+# -------------------------------
+@app.route('/api/analytics/dashboard/<student_id>', methods=['GET'])
+def get_analytics_dashboard(student_id):
+    pipeline = [
+        {'$match': {'student_id': student_id}},
+        {'$group': {'_id': None, 'total_tests': {'$sum': 1}, 'average_score': {'$avg': '$percentage'},
+                    'highest_score': {'$max': '$percentage'}, 'lowest_score': {'$min': '$percentage'},
+                    'categories': {'$addToSet': '$category'}}}
+    ]
+    result = list(test_results_col.aggregate(pipeline))
+    if not result:
+        return jsonify({'message': 'No data available', 'total_tests': 0, 'average_score': 0, 'highest_score': 0, 'lowest_score': 0})
+    d = result[0]
+    return jsonify({
+        'total_tests': d['total_tests'],
+        'average_score': round(d['average_score'], 2),
+        'highest_score': round(d['highest_score'], 2),
+        'lowest_score': round(d['lowest_score'], 2),
+        'categories_attempted': len(d['categories'])
+    })
+
+@app.route('/api/analytics/chart/<student_id>', methods=['GET'])
+def get_chart_data(student_id):
+    results = list(test_results_col.find({'student_id': student_id}))
+    categories, scores = [], []
+    for r in results:
+        if r['category'] not in categories:
+            categories.append(r['category'])
+            scores.append(r['percentage'])
+    return jsonify({'categories': categories, 'scores': scores, 'chart_type': 'bar'})
+
+@app.route('/api/analytics/timeline/<student_id>', methods=['GET'])
+def get_readiness_timeline(student_id):
+    results = list(test_results_col.find({'student_id': student_id}).sort('submitted_at', 1))
+    return jsonify({
+        'timeline': [{'date': r['submitted_at'].strftime('%Y-%m-%d %H:%M'), 'category': r['category'],
+                      'readiness_score': r.get('readiness_score', 0), 'percentage': r['percentage']} for r in results]
+    })
+
+@app.route('/api/analytics/comparison/<student_id>', methods=['GET'])
+def compare_scores(student_id):
+    results = list(test_results_col.find({'student_id': student_id}).sort('submitted_at', -1))
+    comparisons = {}
+    for r in results:
+        cat = r['category']
+        if cat not in comparisons:
+            comparisons[cat] = {'current': r['percentage'], 'previous': None, 'improvement': 0}
+        else:
+            comparisons[cat]['previous'] = r['percentage']
+            comparisons[cat]['improvement'] = comparisons[cat]['current'] - r['percentage']
+    return jsonify({'comparisons': comparisons})
+
+# -------------------------------
 # MODULE 4 - ADMIN
 # -------------------------------
 @app.route('/api/admin/login', methods=['POST'])
