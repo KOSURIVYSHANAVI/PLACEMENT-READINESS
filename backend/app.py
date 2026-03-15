@@ -2,8 +2,10 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson import ObjectId
+from werkzeug.utils import safe_join
 import bcrypt
-from datetime import datetime
+import random
+from datetime import datetime, timezone
 import os
 
 app = Flask(__name__)
@@ -15,26 +17,22 @@ CORS(app)
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
-    if path != "" and os.path.exists(os.path.join('frontend_build', path)):
-        return send_from_directory('frontend_build', path)
-    else:
-        return send_from_directory('frontend_build', 'index.html')
+    build_dir = os.path.join(os.path.dirname(__file__), 'frontend_build')
+    if path != "" and os.path.exists(safe_join(build_dir, path)):
+        return send_from_directory(build_dir, path)
+    return send_from_directory(build_dir, 'index.html')
 
 # -------------------------------
 # MongoDB Connection
 # -------------------------------
-MONGO_URI = os.environ.get(
-    "MONGO_URI",
-    "mongodb+srv://kosurivyshnavi2006_db_user:kFUrh0fPGrgGwEhi@cluster0.dx2e3xi.mongodb.net/?retryWrites=true&w=majority"
-)
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/")
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    client.server_info()  # Test connection
+    client.server_info()
     print("MongoDB connected successfully!")
 except Exception as e:
     print("MongoDB connection failed:", e)
-    exit(1)
 
 # -------------------------------
 # Databases & Collections
@@ -79,7 +77,7 @@ def register():
         'name': data['name'],
         'email': data['email'],
         'password': hashed,
-        'created_at': datetime.utcnow()
+        'created_at': datetime.now(timezone.utc)
     })
     return jsonify({'message': 'Registration successful', 'student_id': str(result.inserted_id)}), 201
 
@@ -93,7 +91,6 @@ def login():
 
 @app.route('/api/questions/<category>', methods=['GET'])
 def get_questions(category):
-    import random
     questions = list(questions_col.find(
         {'category': category},
         {'_id': 1, 'question_text': 1, 'option_a': 1, 'option_b': 1, 'option_c': 1, 'option_d': 1}
@@ -123,7 +120,7 @@ def submit_test():
         'total': total,
         'percentage': percentage,
         'readiness_score': readiness_score,
-        'submitted_at': datetime.utcnow()
+        'submitted_at': datetime.now(timezone.utc)
     })
     return jsonify({'score': score, 'total': total, 'percentage': percentage, 'readiness_score': readiness_score}), 200
 
