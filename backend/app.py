@@ -1,17 +1,17 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson import ObjectId
 import bcrypt
-from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
-
-app = Flask(__name__)
-
-from flask import send_from_directory
 import os
 
+app = Flask(__name__)
+CORS(app)
+
+# -------------------------------
 # Serve React frontend
+# -------------------------------
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
@@ -19,34 +19,44 @@ def serve_react(path):
         return send_from_directory('frontend_build', path)
     else:
         return send_from_directory('frontend_build', 'index.html')
-    
-CORS(app)
 
-#client = MongoClient('mongodb://localhost:27017/', maxPoolSize=50, minPoolSize=10)
-import os
-from pymongo import MongoClient
-
-#client = MongoClient(os.environ.get("MONGO_URI"))
-client = MongoClient(
-    os.environ.get("MONGO_URI", "mongodb://localhost:27017/")
+# -------------------------------
+# MongoDB Connection
+# -------------------------------
+MONGO_URI = os.environ.get(
+    "MONGO_URI",
+    "mongodb+srv://kosurivyshnavi2006_db_user:kFUrh0fPGrgGwEhi@cluster0.dx2e3xi.mongodb.net/?retryWrites=true&w=majority"
 )
 
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    client.server_info()  # Test connection
+    print("MongoDB connected successfully!")
+except Exception as e:
+    print("MongoDB connection failed:", e)
+    exit(1)
 
-# Databases
+# -------------------------------
+# Databases & Collections
+# -------------------------------
 db1 = client['placement_readiness_module1']
 db2 = client['placement_readiness_module2']
 db4 = client['placement_readiness_module4']
 
-# Collections
 students_col = db1['students']
 questions_col = db1['questions']
 test_results_col = db1['test_results']
+
 roadmaps_col = db2['roadmaps']
 job_roles_col = db2['job_roles']
 company_col = db2['company_eligibility']
-admins_col = db4['admins']
 
-# Indexes
+admins_col = db4['admins']
+subjects_col = db4['subjects']
+
+# -------------------------------
+# Index creation
+# -------------------------------
 students_col.create_index('email', unique=True)
 questions_col.create_index('category')
 test_results_col.create_index([('student_id', 1), ('submitted_at', -1)])
@@ -54,11 +64,11 @@ roadmaps_col.create_index('category')
 job_roles_col.create_index('required_skills')
 company_col.create_index('min_score')
 admins_col.create_index('email', unique=True)
+subjects_col.create_index('key', unique=True)
 
-# ─────────────────────────────────────────────
-# MODULE 1 — ASSESSMENT
-# ─────────────────────────────────────────────
-
+# -------------------------------
+# MODULE 1 - STUDENT REGISTRATION / LOGIN / TESTS
+# -------------------------------
 @app.route('/api/student/register', methods=['POST'])
 def register():
     data = request.json
@@ -69,7 +79,7 @@ def register():
         'name': data['name'],
         'email': data['email'],
         'password': hashed,
-        'created_at': datetime.now()
+        'created_at': datetime.utcnow()
     })
     return jsonify({'message': 'Registration successful', 'student_id': str(result.inserted_id)}), 201
 
@@ -113,7 +123,7 @@ def submit_test():
         'total': total,
         'percentage': percentage,
         'readiness_score': readiness_score,
-        'submitted_at': datetime.now()
+        'submitted_at': datetime.utcnow()
     })
     return jsonify({'score': score, 'total': total, 'percentage': percentage, 'readiness_score': readiness_score}), 200
 
@@ -126,10 +136,9 @@ def get_results(student_id):
         r['submitted_at'] = r['submitted_at'].strftime('%Y-%m-%d %H:%M:%S')
     return jsonify(results), 200
 
-# ─────────────────────────────────────────────
-# MODULE 2 — CAREER GUIDANCE
-# ─────────────────────────────────────────────
-
+# -------------------------------
+# MODULE 2 - CAREER GUIDANCE
+# -------------------------------
 @app.route('/api/guidance/roadmap/<student_id>', methods=['GET'])
 def get_personalized_roadmap(student_id):
     results = list(test_results_col.find({'student_id': student_id}))
@@ -171,93 +180,9 @@ def check_company_eligibility(student_id):
         'total_eligible': len(eligible)
     })
 
-@app.route('/api/guidance/roadmap/add', methods=['POST'])
-def add_roadmap_guidance():
-    data = request.json
-    roadmaps_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Roadmap added successfully'}), 201
-
-@app.route('/api/guidance/job-role/add', methods=['POST'])
-def add_job_role():
-    data = request.json
-    job_roles_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Job role added successfully'}), 201
-
-@app.route('/api/guidance/company/add', methods=['POST'])
-def add_company_guidance():
-    data = request.json
-    company_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Company added successfully'}), 201
-
-# ─────────────────────────────────────────────
-# MODULE 3 — ANALYTICS
-# ─────────────────────────────────────────────
-
-@app.route('/api/analytics/progress/<student_id>', methods=['GET'])
-def get_student_progress(student_id):
-    results = list(test_results_col.find({'student_id': student_id}).sort('submitted_at', 1))
-    return jsonify({
-        'total_tests': len(results),
-        'progress_data': [{'category': r['category'], 'percentage': r['percentage'],
-                           'date': r['submitted_at'].strftime('%Y-%m-%d'),
-                           'readiness_score': r.get('readiness_score', 0)} for r in results]
-    })
-
-@app.route('/api/analytics/comparison/<student_id>', methods=['GET'])
-def compare_scores(student_id):
-    results = list(test_results_col.find({'student_id': student_id}).sort('submitted_at', -1))
-    comparisons = {}
-    for r in results:
-        cat = r['category']
-        if cat not in comparisons:
-            comparisons[cat] = {'current': r['percentage'], 'previous': None, 'improvement': 0}
-        else:
-            comparisons[cat]['previous'] = r['percentage']
-            comparisons[cat]['improvement'] = comparisons[cat]['current'] - r['percentage']
-    return jsonify({'comparisons': comparisons})
-
-@app.route('/api/analytics/chart/<student_id>', methods=['GET'])
-def get_chart_data(student_id):
-    results = list(test_results_col.find({'student_id': student_id}))
-    categories, scores = [], []
-    for r in results:
-        if r['category'] not in categories:
-            categories.append(r['category'])
-            scores.append(r['percentage'])
-    return jsonify({'categories': categories, 'scores': scores, 'chart_type': 'bar'})
-
-@app.route('/api/analytics/dashboard/<student_id>', methods=['GET'])
-def get_analytics_dashboard(student_id):
-    pipeline = [
-        {'$match': {'student_id': student_id}},
-        {'$group': {'_id': None, 'total_tests': {'$sum': 1}, 'average_score': {'$avg': '$percentage'},
-                    'highest_score': {'$max': '$percentage'}, 'lowest_score': {'$min': '$percentage'},
-                    'categories': {'$addToSet': '$category'}}}
-    ]
-    result = list(test_results_col.aggregate(pipeline))
-    if not result:
-        return jsonify({'message': 'No data available', 'total_tests': 0, 'average_score': 0, 'highest_score': 0, 'lowest_score': 0})
-    d = result[0]
-    return jsonify({
-        'total_tests': d['total_tests'],
-        'average_score': round(d['average_score'], 2),
-        'highest_score': round(d['highest_score'], 2),
-        'lowest_score': round(d['lowest_score'], 2),
-        'categories_attempted': len(d['categories'])
-    })
-
-@app.route('/api/analytics/timeline/<student_id>', methods=['GET'])
-def get_readiness_timeline(student_id):
-    results = list(test_results_col.find({'student_id': student_id}).sort('submitted_at', 1))
-    return jsonify({
-        'timeline': [{'date': r['submitted_at'].strftime('%Y-%m-%d %H:%M'), 'category': r['category'],
-                      'readiness_score': r.get('readiness_score', 0), 'percentage': r['percentage']} for r in results]
-    })
-
-# ─────────────────────────────────────────────
-# MODULE 4 — ADMIN
-# ─────────────────────────────────────────────
-
+# -------------------------------
+# MODULE 4 - ADMIN
+# -------------------------------
 @app.route('/api/admin/login', methods=['POST'])
 def login_admin():
     data = request.json
@@ -281,93 +206,9 @@ def get_all_students():
                                    'registered_at': s['created_at'].strftime('%Y-%m-%d')} for s in students],
                     'total': len(students)})
 
-@app.route('/api/admin/analytics', methods=['GET'])
-def get_system_analytics():
-    total_students = students_col.count_documents({})
-    total_tests = test_results_col.count_documents({})
-    total_questions = questions_col.count_documents({})
-    total_roadmaps = roadmaps_col.count_documents({})
-    result = list(test_results_col.aggregate([{'$group': {'_id': None, 'avg': {'$avg': '$percentage'}}}]))
-    avg_performance = result[0]['avg'] if result else 0
-    category_stats = list(test_results_col.aggregate([
-        {'$group': {'_id': '$category', 'avg_score': {'$avg': '$percentage'}, 'count': {'$sum': 1}}}
-    ]))
-    return jsonify({
-        'total_students': total_students, 'total_tests': total_tests,
-        'total_questions': total_questions, 'total_roadmaps': total_roadmaps,
-        'avg_performance': round(avg_performance, 2),
-        'category_stats': [{'category': s['_id'], 'avg_score': round(s['avg_score'], 2), 'attempts': s['count']} for s in category_stats]
-    })
-
-@app.route('/api/admin/questions', methods=['POST'])
-def add_question():
-    data = request.json
-    questions_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Question added successfully'}), 201
-
-@app.route('/api/admin/questions', methods=['GET'])
-def get_all_questions():
-    questions = list(questions_col.find())
-    return jsonify([{'id': str(q['_id']), 'category': q['category'],
-                     'question_text': q['question_text'], 'correct_answer': q['correct_answer']} for q in questions])
-
-@app.route('/api/admin/questions/count', methods=['GET'])
-def get_question_counts():
-    counts = list(questions_col.aggregate([{'$group': {'_id': '$category', 'count': {'$sum': 1}}}]))
-    return jsonify([{'category': c['_id'], 'count': c['count']} for c in counts])
-
-@app.route('/api/admin/roadmaps', methods=['POST'])
-def add_roadmap():
-    data = request.json
-    roadmaps_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Roadmap added successfully'}), 201
-
-@app.route('/api/admin/roadmaps', methods=['GET'])
-def get_all_roadmaps():
-    roadmaps = list(roadmaps_col.find())
-    return jsonify([{'id': str(r['_id']), 'category': r['category'], 'title': r['title'],
-                     'description': r['description'], 'resources': r['resources'], 'duration': r['duration']} for r in roadmaps])
-
-@app.route('/api/admin/companies', methods=['POST'])
-def add_company():
-    data = request.json
-    company_col.insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Company added successfully'}), 201
-
-@app.route('/api/admin/subjects', methods=['POST'])
-def add_subject():
-    data = request.json
-    db4['subjects'].insert_one({**data, 'created_at': datetime.utcnow()})
-    return jsonify({'message': 'Subject added successfully'}), 201
-
-@app.route('/api/admin/subjects', methods=['GET'])
-def get_all_subjects():
-    subjects = list(db4['subjects'].find())
-    return jsonify([{'id': str(s['_id']), 'key': s['key'], 'name': s['name'], 'icon': s.get('icon', '📚')} for s in subjects])
-
-@app.route('/api/admin/reports/placement-readiness', methods=['GET'])
-def generate_placement_report():
-    students = list(students_col.find())
-    report = []
-    for s in students:
-        results = list(test_results_col.find({'student_id': str(s['_id'])}))
-        if results:
-            avg = sum(r['percentage'] for r in results) / len(results)
-            report.append({
-                'student_name': s['name'], 'email': s['email'],
-                'tests_completed': len(results), 'average_score': round(avg, 2),
-                'placement_ready': 'Yes' if avg >= 70 else 'No',
-                'recommendation': 'Ready for placements' if avg >= 70 else 'Needs more preparation'
-            })
-    return jsonify({
-        'report_date': datetime.utcnow().strftime('%Y-%m-%d'),
-        'total_students': len(report),
-        'ready_students': len([s for s in report if s['placement_ready'] == 'Yes']),
-        'students': report
-    })
-
-import os
-
+# -------------------------------
+# Run Server
+# -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
