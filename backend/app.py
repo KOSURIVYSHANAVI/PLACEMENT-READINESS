@@ -7,6 +7,19 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
 app = Flask(__name__)
+
+from flask import send_from_directory
+import os
+
+# Serve React frontend
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_react(path):
+    if path != "" and os.path.exists(os.path.join('frontend_build', path)):
+        return send_from_directory('frontend_build', path)
+    else:
+        return send_from_directory('frontend_build', 'index.html')
+    
 CORS(app)
 
 #client = MongoClient('mongodb://localhost:27017/', maxPoolSize=50, minPoolSize=10)
@@ -14,6 +27,7 @@ import os
 from pymongo import MongoClient
 
 client = MongoClient(os.environ.get("MONGO_URI"))
+
 
 # Databases
 db1 = client['placement_readiness_module1']
